@@ -94,6 +94,15 @@ jobs:
         with:
           cache: true
 
+      # Gradle's file-system watching is for repeated builds on a developer's
+      # machine. On a runner it once failed with "Caught exception: Already
+      # watching path: .../android" and the build then hung until the job
+      # timed out, so it stays off here.
+      - name: Gradle settings for CI
+        run: |
+          mkdir -p ~/.gradle
+          echo "org.gradle.vfs.watch=false" >> ~/.gradle/gradle.properties
+
       - name: Signing key
         working-directory: app
         env:
@@ -119,12 +128,25 @@ jobs:
           set -euo pipefail
           if [ -z "$SHOREBIRD_TOKEN" ]; then echo "::error::SHOREBIRD_TOKEN secret is missing"; exit 1; fi
           shorebird doctor || true
-          shorebird release android \
-            --artifact apk \
-            --flutter-version "$FLUTTER_VERSION" \
-            --build-name "${{ steps.v.outputs.version }}" \
-            --build-number "${{ steps.v.outputs.build }}" \
-            --no-confirm
+          release() {
+            shorebird release android \
+              --artifact apk \
+              --flutter-version "$FLUTTER_VERSION" \
+              --build-name "${{ steps.v.outputs.version }}" \
+              --build-number "${{ steps.v.outputs.build }}" \
+              --no-confirm
+          }
+          export -f release
+          # The build takes under ten minutes. One that hangs (Gradle once
+          # stalled after a file-watching error) is stopped after 18 and tried
+          # once more; Shorebird only records the release after a successful
+          # build, so the retry is safe.
+          timeout 18m bash -c release || {
+            echo "::warning::shorebird release failed or hung; trying once more"
+            (cd android && ./gradlew --stop) >/dev/null 2>&1 || true
+            pkill -f 'GradleDaemon|GradleWrapperMain|KotlinCompileDaemon|shorebird' || true
+            timeout 18m bash -c release
+          }
           mkdir -p "$GITHUB_WORKSPACE/dist"
           # Fixed name: the landing page links to releases/latest/download/ghani-group.apk.
           cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/dist/ghani-group.apk"
