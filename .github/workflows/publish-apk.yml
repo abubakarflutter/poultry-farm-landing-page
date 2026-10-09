@@ -3,12 +3,16 @@
 # always gives the newest APK.
 #
 # The app's source is private (abubakarflutter/poultry-farm). Its own
-# "Release Android APK" workflow pushes a tag here named app-v<version>-build<n>
-# whose message is the app commit; this workflow builds that commit with the
-# same signing key and publishes it. It can also be run by hand.
+# "Release Android app" workflow pushes a tag here named app-v<version>-build<n>
+# whose message is the app commit; this workflow builds that commit with
+# `shorebird release`, signed with the same key, and publishes it. The build
+# also becomes the Shorebird release that later over-the-air updates
+# ("Push app update" in the app repo) are built against, so this is the only
+# place the APK is built. It can also be run by hand.
 #
 # Secrets: FARM_APP_DEPLOY_KEY (read-only deploy key on poultry-farm),
-# ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS.
+# SHOREBIRD_TOKEN (a Shorebird API key), ANDROID_KEYSTORE_BASE64,
+# ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS.
 name: Publish app APK
 
 on:
@@ -33,6 +37,10 @@ permissions:
 concurrency:
   group: publish-apk
   cancel-in-progress: false
+
+env:
+  # The Flutter version Shorebird builds with; patches reuse the release's.
+  FLUTTER_VERSION: 3.47.5
 
 jobs:
   publish:
@@ -82,10 +90,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: subosito/flutter-action@v2
+      - uses: shorebirdtech/setup-shorebird@v1
         with:
-          channel: stable
-          flutter-version: 3.47.3
           cache: true
 
       - name: Signing key
@@ -96,6 +102,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ]; then echo "::error::ANDROID_KEYSTORE_BASE64 secret is missing"; exit 1; fi
           echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
           {
             echo "storeFile=$RUNNER_TEMP/release.jks"
@@ -104,20 +111,23 @@ jobs:
             echo "keyAlias=$KEY_ALIAS"
           } > android/key.properties
 
-      - name: Build APKs
+      - name: Shorebird release (signed APK)
         working-directory: app
+        env:
+          SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
         run: |
           set -euo pipefail
-          flutter pub get
-          args="--release --build-name ${{ steps.v.outputs.version }} --build-number ${{ steps.v.outputs.build }}"
-          flutter build apk $args
-          flutter build apk $args --split-per-abi
+          if [ -z "$SHOREBIRD_TOKEN" ]; then echo "::error::SHOREBIRD_TOKEN secret is missing"; exit 1; fi
+          shorebird doctor || true
+          shorebird release android \
+            --artifact apk \
+            --flutter-version "$FLUTTER_VERSION" \
+            --build-name "${{ steps.v.outputs.version }}" \
+            --build-number "${{ steps.v.outputs.build }}" \
+            --no-confirm
           mkdir -p "$GITHUB_WORKSPACE/dist"
-          out=build/app/outputs/flutter-apk
-          # Fixed names: the landing page links to releases/latest/download/ghani-group.apk.
-          cp "$out/app-release.apk" "$GITHUB_WORKSPACE/dist/ghani-group.apk"
-          cp "$out/app-arm64-v8a-release.apk" "$GITHUB_WORKSPACE/dist/ghani-group-arm64.apk"
-          cp "$out/app-armeabi-v7a-release.apk" "$GITHUB_WORKSPACE/dist/ghani-group-arm32.apk"
+          # Fixed name: the landing page links to releases/latest/download/ghani-group.apk.
+          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/dist/ghani-group.apk"
           (cd "$GITHUB_WORKSPACE/dist" && sha256sum *.apk > SHA256SUMS.txt && ls -la)
 
       - name: Publish release
@@ -130,13 +140,12 @@ jobs:
           {
             echo "## Ghani Group app"
             echo
-            echo "| Version | Build number |"
-            echo "|---|---|"
-            echo "| **$v** | **$b** |"
+            echo "| Version | Build number | Shorebird release |"
+            echo "|---|---|---|"
+            echo "| **$v** | **$b** | \`$v+$b\` |"
             echo
             echo "- \`ghani-group.apk\` works on every Android phone."
-            echo "- \`ghani-group-arm64.apk\` is smaller, for most phones from the last few years."
-            echo "- \`ghani-group-arm32.apk\` is for older phones."
+            echo "- Later improvements reach this version inside the app (restart when it says an update is ready)."
             echo
             echo "Web app and download page: https://ghani-poultry.web.app"
           } > "$RUNNER_TEMP/notes.md"
