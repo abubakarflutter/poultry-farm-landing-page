@@ -1,5 +1,5 @@
 # Publishes the Ghani Group member app here, in a public release, so the
-# landing page's Download button (releases/latest/download/ghani-group.apk)
+# web app landing page Download button (releases/latest/download/ghani-group.apk)
 # always gives the newest APK.
 #
 # The app's source is private (abubakarflutter/poultry-farm). Its own
@@ -138,7 +138,7 @@ jobs:
             echo "- \`ghani-group-arm64.apk\` is smaller, for most phones from the last few years."
             echo "- \`ghani-group-arm32.apk\` is for older phones."
             echo
-            echo "Download page: https://ghani-poultry.web.app"
+            echo "Web app and download page: https://ghani-poultry.web.app"
           } > "$RUNNER_TEMP/notes.md"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$GITHUB_WORKSPACE"/dist/* --clobber
