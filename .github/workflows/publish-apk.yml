@@ -200,7 +200,7 @@ jobs:
           packageName: com.sikkafarm.poultry_farm
           releaseFiles: ${{ github.workspace }}/dist/ghani-group.aab
           track: alpha
-          status: completed
+          status: draft
 
       - name: Remove signing key
         if: always()
