@@ -13,6 +13,9 @@
 # Secrets: FARM_APP_DEPLOY_KEY (read-only deploy key on poultry-farm),
 # SHOREBIRD_TOKEN (a Shorebird API key), ANDROID_KEYSTORE_BASE64,
 # ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS.
+# PLAY_SERVICE_ACCOUNT_JSON (Play Console service account, Release manager).
+# When that secret is set, the same Shorebird build's .aab is uploaded to the
+# closed-testing track. Patches stay tied to that release.
 name: Publish app APK
 
 on:
@@ -46,6 +49,8 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -150,7 +155,10 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/dist"
           # Fixed name: the landing page links to releases/latest/download/ghani-group.apk.
           cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/dist/ghani-group.apk"
-          (cd "$GITHUB_WORKSPACE/dist" && sha256sum *.apk > SHA256SUMS.txt && ls -la)
+          aab=$(find build/app/outputs -name '*.aab' -print -quit)
+          if [ -z "$aab" ]; then echo "::error::Shorebird did not produce an app bundle"; exit 1; fi
+          cp "$aab" "$GITHUB_WORKSPACE/dist/ghani-group.aab"
+          (cd "$GITHUB_WORKSPACE/dist" && sha256sum ghani-group.apk ghani-group.aab > SHA256SUMS.txt && ls -la)
 
       - name: Publish release
         working-directory: landing
@@ -172,14 +180,27 @@ jobs:
             echo "Web app and download page: https://ghani-poultry.web.app"
           } > "$RUNNER_TEMP/notes.md"
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "$GITHUB_WORKSPACE"/dist/* --clobber
+            gh release upload "$tag" "$GITHUB_WORKSPACE"/dist/ghani-group.apk "$GITHUB_WORKSPACE"/dist/SHA256SUMS.txt --clobber
             gh release edit "$tag" --latest
           else
-            gh release create "$tag" "$GITHUB_WORKSPACE"/dist/* \
+            gh release create "$tag" "$GITHUB_WORKSPACE"/dist/ghani-group.apk "$GITHUB_WORKSPACE"/dist/SHA256SUMS.txt \
               --title "Ghani Group $v (build $b)" \
               --notes-file "$RUNNER_TEMP/notes.md" \
               --latest
           fi
+
+      # Same Shorebird release as the APK above. Closed testing is the "alpha"
+      # track in the Play Developer API. Skip quietly until the service account
+      # secret exists, so the landing APK still publishes.
+      - name: Upload the bundle to Play closed testing
+        if: env.PLAY_JSON != ''
+        uses: r0adkll/upload-google-play@v1.1.3
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.sikkafarm.poultry_farm
+          releaseFiles: ${{ github.workspace }}/dist/ghani-group.aab
+          track: alpha
+          status: completed
 
       - name: Remove signing key
         if: always()
