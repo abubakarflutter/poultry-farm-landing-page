@@ -2,7 +2,7 @@
 # web app landing page Download button (releases/latest/download/ghani-group.apk)
 # always gives the newest APK.
 #
-# The app's source is private (abubakarflutter/poultry-farm). Its own
+# The app's source is private (Ghani-Poultry-Group/poultry-farm). Its own
 # "Release Android app" workflow pushes a tag here named app-v<version>-build<n>
 # whose message is the app commit; this workflow builds that commit with
 # `shorebird release`, signed with the same key, and publishes it. The build
@@ -85,7 +85,7 @@ jobs:
       - name: App source (private poultry-farm repo)
         uses: actions/checkout@v4
         with:
-          repository: abubakarflutter/poultry-farm
+          repository: Ghani-Poultry-Group/poultry-farm
           ref: ${{ steps.v.outputs.ref }}
           path: app
           ssh-key: ${{ secrets.FARM_APP_DEPLOY_KEY }}
